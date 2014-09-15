@@ -7,55 +7,43 @@ Page = require 'page'
 Server = require 'server'
 Ui = require 'ui'
 
-exports.render = ->
-	Dom.h2 "Hello, World!"
+exports.render = !->
+	Dom.h2 "Hacker News"
 
-	Obs.observe ->
-		# We're inside an additional observe scope here, such that our whole
-		# exports.render function won't need to rerun when the counter changes
-		# value.
-		currentValue = Db.shared.get('counter') # a reactive read from the shared database
-		Ui.bigButton "#{currentValue}++", ->
-			Server.call 'incr'
+	unread = Db.personal.peek("unread") || {}
+	for k of unread
+		Obs.onTime 2000, !->
+			Server.send "read"
+		break
 
-	Ui.bigButton 'get server time', ->
-		Server.call 'getTime', (time) ->
-			Modal.show "it is now: #{time}"
+	Ui.list !->
+		Db.shared.ref("stories").iterate (story) !->
+			Ui.item !->
+				Dom.style minHeight: '45px'
+				if unread[story.key()]
+					Dom.style background: '#ff6600'
 
-	Ui.bigButton 'client error', ->
-		{}.noSuchMethod()
+				Dom.div !->
+					Dom.style _boxFlex: 1
+					Dom.text story.get("title")
 
-	Ui.bigButton 'server error', ->
-		Server.call 'error'
+				Dom.div !->
+					story.iterate "votes", (vote) !->
+						userId = vote.key()
+						Ui.avatar Plugin.userAvatar(userId), !->
+							Dom.style display: 'inline-block'
 
-	Dom.div ->
-		Dom.style
-			padding: "10px"
-			margin: "3%"
-			color: "white"
-			backgroundColor: "#44a"
-			_userSelect: 'text' # the underscore gets replace by -webkit- or whatever else is applicable
-		Dom.h2 Db.shared.get('http') || "HTTP end-point demo"
-		Dom.code "curl --data-binary 'your text' " + Plugin.inboundUrl()
+				Dom.onTap !->
+					Server.call "vote", story.key()
 
-	Ui.list ->
-		items =
-			"Db.local": Db.local.get()
-			"Db.personal": Db.personal.get()
-			"Db.shared": Db.shared.get()
-			"Plugin.agent": Plugin.agent()
-			"Plugin.groupAvatar": Plugin.groupAvatar()
-			"Plugin.groupCode": Plugin.groupCode()
-			"Plugin.groupId": Plugin.groupId()
-			"Plugin.groupName": Plugin.groupName()
-			"Plugin.userAvatar": Plugin.userAvatar()
-			"Plugin.userId": Plugin.userId()
-			"Plugin.userIsAdmin": Plugin.userIsAdmin()
-			"Plugin.userName": Plugin.userName()
-			"Plugin.users": Plugin.users.get()
-			"Page.state": Page.state.get()
-			"Dom.viewport": Dom.viewport.get()
-		for name,value of items
-			text = "#{name} = " + JSON.stringify(value)
-			Ui.item text.replace(/,/g, ', ') # ensure some proper json wrapping on small screens
 
+		, (story) ->
+			log "sort call for", story.key()
+			votes = story.peek("votes")
+			i = 0
+			--i for x of votes
+			i
+
+exports.renderSettings = !->
+	Ui.bigButton "update", !->
+		Server.call "update"

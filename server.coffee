@@ -1,24 +1,42 @@
+Plugin = require 'plugin'
 Db = require 'db'
+Http = require 'http'
+Event = require 'event'
 
-exports.onInstall = ->
-	# set the counter to 0 on plugin installation
-	Db.shared.set 'counter', 0
+exports.client_vote = (storyId) !->
+	Db.shared.modify "stories", storyId, "votes", Plugin.userId(), (v) ->
+		if v then null else true
 
-# exported functions prefixed with 'client_' are callable by our client code using `require('plugin').rpc`
-exports.client_incr = ->
-	log 'hello world!' # write to the plugin origin's log
-	Db.shared.modify 'counter', (v) -> v+1
+exports.client_read = !->
+	Db.personal(Plugin.userId()).set("unread", {})
 
-exports.client_getTime = (cb) ->
-	cb.reply new Date()
+exports.client_update = !->
+	Plugin.assertAdmin()
+	update()
 
-exports.client_error = ->
-	{}.noSuchMethod()
+exports.hourly = !->
+	update()
 
-exports.onHttp = (request) ->
-	if (data = request.data)?
-		Db.shared.set 'http', data
-	else
-		data = Db.shared.get('http')
-	request.respond 200, data || "no data"
+update = !->
+	Http.get "https://news.ycombinator.com"
 
+exports.onHttpResponse = (data) !->
+
+	re = /down_([0-9]+)"><\/span><\/center><\/td><td class="title"><a href="([^"]+)">([^<]+)<\/a>/g
+
+	unread = {}
+	while m = re.exec(data)
+		[all, id, url, title] = m
+
+		if !Db.shared.get("stories", id)
+			unread[id] = true
+			Event.create
+				unit: "new"
+				text: "New HN article: #{title}"
+
+		Db.shared.merge "stories", id,
+			title: title
+			url: url
+
+	for userId in Plugin.userIds()
+		Db.personal(userId).merge("unread", unread)
